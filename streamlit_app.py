@@ -1,151 +1,73 @@
 import streamlit as st
-import pandas as pd
-import math
-from pathlib import Path
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# --- Funções de cálculo ---
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+def calcular_tributos_atuais(valor, pis=0.0165, cofins=0.076, icms=0.12, ipi=0.10):
+    return {
+        "PIS": valor * pis,
+        "COFINS": valor * cofins,
+        "ICMS": valor * icms,
+        "IPI": valor * ipi
+    }
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+def calcular_tributos_reforma(valor, cbs=0.0925, ibs=0.14, seletivo=0.10):
+    return {
+        "CBS": valor * cbs,
+        "IBS": valor * ibs,
+        "IMPOSTO SELETIVO": valor * seletivo
+    }
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+# --- Interface Streamlit ---
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+st.set_page_config(page_title="Simulador Reforma Tributária", layout="centered")
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+st.title("📊 Simulador Reforma Tributária")
+st.markdown("Compare a carga tributária atual com a proposta pela Reforma.")
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+# Entrada do usuário
+valor_operacao = st.number_input("💰 Valor da Operação (R$)", min_value=0.0, step=100.0, value=1000.0)
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+# Alíquotas customizáveis (opcional)
+with st.expander("⚙️ Configurar Alíquotas (opcional)"):
+    col1, col2 = st.columns(2)
+    with col1:
+        pis = st.number_input("PIS (%)", value=1.65) / 100
+        cofins = st.number_input("COFINS (%)", value=7.6) / 100
+        icms = st.number_input("ICMS (%)", value=12.0) / 100
+        ipi = st.number_input("IPI (%)", value=10.0) / 100
+    with col2:
+        cbs = st.number_input("CBS (%)", value=9.25) / 100
+        ibs = st.number_input("IBS (%)", value=14.0) / 100
+        seletivo = st.number_input("Imposto Seletivo (%)", value=10.0) / 100
 
-    return gdp_df
+# Botão de simulação
+if st.button("📈 Simular"):
+    tributos_atuais = calcular_tributos_atuais(valor_operacao, pis, cofins, icms, ipi)
+    tributos_reforma = calcular_tributos_reforma(valor_operacao, cbs, ibs, seletivo)
 
-gdp_df = get_gdp_data()
+    total_atual = sum(tributos_atuais.values())
+    total_reforma = sum(tributos_reforma.values())
+    diferenca = total_reforma - total_atual
+    variacao = (diferenca / valor_operacao) * 100 if valor_operacao else 0
 
-# -----------------------------------------------------------------------------
-# Draw the actual page
+    st.subheader("🧾 Tributação Atual")
+    for tributo, valor in tributos_atuais.items():
+        st.write(f"{tributo}: R$ {valor:,.2f}")
+    st.write(f"**Total Atual:** R$ {total_atual:,.2f}")
 
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
+    st.subheader("🏛️ Tributação com Reforma")
+    for tributo, valor in tributos_reforma.items():
+        st.write(f"{tributo}: R$ {valor:,.2f}")
+    st.write(f"**Total Reforma:** R$ {total_reforma:,.2f}")
 
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
+    st.subheader("📊 Comparativo")
+    st.write(f"**Diferença:** R$ {diferenca:,.2f}")
+    st.write(f"**Variação da Carga Tributária:** {variacao:.2f}%")
 
-# Add some spacing
-''
-''
+    if variacao > 0:
+        st.warning("⚠️ A carga tributária aumentou.")
+    elif variacao < 0:
+        st.success("✅ A carga tributária reduziu.")
+    else:
+        st.info("➖ A carga tributária permaneceu igual.")
 
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
